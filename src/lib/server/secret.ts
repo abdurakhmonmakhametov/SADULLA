@@ -14,6 +14,10 @@ const g = globalThis as typeof globalThis & { __suhbatdoshKey?: Buffer };
 function masterKey(): Buffer {
   if (g.__suhbatdoshKey) return g.__suhbatdoshKey;
   let secret = process.env.APP_SECRET;
+  if (!secret && process.env.VERCEL) {
+    // Serverless file systems are read-only and per-instance: a generated secret would not survive.
+    throw new Error("APP_SECRET is not set. Add it in the Vercel project's environment variables.");
+  }
   if (!secret) {
     const dataFile = process.env.DATA_FILE || path.join(process.cwd(), "data", "db.json");
     const file = path.join(path.dirname(dataFile), ".secret");
