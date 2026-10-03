@@ -4,7 +4,9 @@ import { mutate, type Data } from "@/lib/server/db";
 
 /**
  * TEMPORARY one-time import of the local JSON database into Postgres.
- * Requires the APP_SECRET header and only runs while the database has no users.
+ * Requires the APP_SECRET header. Merges without overwriting: accounts whose
+ * email already exists keep their online record (their local interviews are
+ * attached to it, and a saved AI key is copied only if none is set).
  * Remove after the migration.
  */
 export async function POST(req: Request) {
@@ -15,11 +17,30 @@ export async function POST(req: Request) {
 
   const body = (await req.json()) as Partial<Data>;
   const result = await mutate((d) => {
-    if (d.users.length > 0) return { imported: false, reason: "database already has users", users: d.users.length };
-    d.users = body.users ?? [];
-    d.interviews = body.interviews ?? [];
-    d.sessions = []; // everyone signs in again
-    return { imported: true, users: d.users.length, interviews: d.interviews.length };
+    const idMap = new Map<string, string>();
+    let added = 0;
+    let merged = 0;
+    for (const u of body.users ?? []) {
+      const existing = d.users.find((x) => x.email.toLowerCase() === u.email.toLowerCase());
+      if (existing) {
+        idMap.set(u.id, existing.id);
+        if (!existing.ai && u.ai) existing.ai = u.ai;
+        merged++;
+      } else {
+        d.users.push(u);
+        idMap.set(u.id, u.id);
+        added++;
+      }
+    }
+    const known = new Set(d.interviews.map((i) => i.id));
+    let interviews = 0;
+    for (const iv of body.interviews ?? []) {
+      const owner = idMap.get(iv.userId);
+      if (!owner || known.has(iv.id)) continue;
+      d.interviews.push({ ...iv, userId: owner });
+      interviews++;
+    }
+    return { usersAdded: added, usersMerged: merged, interviewsAdded: interviews, totalUsers: d.users.length, totalInterviews: d.interviews.length };
   });
   return NextResponse.json(result);
 }
