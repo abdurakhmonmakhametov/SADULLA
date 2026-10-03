@@ -15,6 +15,21 @@ export async function POST(req: Request) {
   const ok = secret.length > 0 && given.length === secret.length && timingSafeEqual(Buffer.from(given), Buffer.from(secret));
   if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  // Cleanup of a smoke-test account: ?deleteEmail=…
+  const deleteEmail = new URL(req.url).searchParams.get("deleteEmail")?.toLowerCase();
+  if (deleteEmail) {
+    const removed = await mutate((d) => {
+      const u = d.users.find((x) => x.email.toLowerCase() === deleteEmail);
+      if (!u) return { deleted: false };
+      d.users = d.users.filter((x) => x.id !== u.id);
+      d.sessions = d.sessions.filter((s) => s.userId !== u.id);
+      const before = d.interviews.length;
+      d.interviews = d.interviews.filter((i) => i.userId !== u.id);
+      return { deleted: true, interviewsRemoved: before - d.interviews.length };
+    });
+    return NextResponse.json(removed);
+  }
+
   const body = (await req.json()) as Partial<Data>;
   const result = await mutate((d) => {
     const idMap = new Map<string, string>();
